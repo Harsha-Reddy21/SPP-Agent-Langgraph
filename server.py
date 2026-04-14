@@ -20,6 +20,7 @@ load_dotenv()
 # LOGGING — DEBUG level to see all internal node/LLM activity
 # ─────────────────────────────────────────────────────────────────────────────
 
+os.environ['OPENAI_API_KEY']=os.getenv("OPENAI_API_KEY")  # Ensure key is in env for any subprocesses
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
