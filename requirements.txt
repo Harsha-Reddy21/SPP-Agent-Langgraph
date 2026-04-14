@@ -3,3 +3,10 @@ langchain-openai>=0.3.0
 langchain-core>=0.3.0
 pydantic
 python-dotenv
+PyPDF2
+python-docx
+streamlit
+fastapi
+uvicorn[standard]
+python-multipart
+requests

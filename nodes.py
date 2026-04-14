@@ -19,6 +19,7 @@ from prompts import (
     EDUCATION_SYSTEM, EDUCATION_USER,
     COMPLETION_SYSTEM, COMPLETION_USER,
     FILE_EXTRACTION_SYSTEM, FILE_EXTRACTION_USER,
+    DOCUMENT_UPLOAD_SYSTEM, DOCUMENT_UPLOAD_USER,
 )
 from quality import compute_quality_score
 
@@ -175,6 +176,9 @@ def router_node(state: GraphState) -> GraphState:
     if all_answered:
         route = "complete"
         logger.info("[ROUTER] Hard override → complete (all answered)")
+    elif inp.uploaded_document_content:
+        route = "document_upload"
+        logger.info("[ROUTER] Hard override → document_upload (document content present)")
     elif inp.file_extraction_results:
         route = "file_extraction"
         logger.info("[ROUTER] Hard override → file_extraction")
@@ -212,6 +216,8 @@ def extractor_node(state: GraphState) -> GraphState:
     ]
 
     ie_data = result.get("interactiveElements")
+    if ie_data and "questionId" in ie_data:
+        ie_data["question_id"] = ie_data.pop("questionId")
     interactive = InteractiveElement(**ie_data) if ie_data else None
 
     # apply extracted answers to get updated QA for quality scoring
@@ -347,7 +353,55 @@ def file_extraction_node(state: GraphState) -> GraphState:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NODE 6 — RESPONSE ASSEMBLER
+# NODE 6 — DOCUMENT UPLOAD
+# Reads raw document content and maps it to Q&A using user's prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+def document_upload_node(state: GraphState) -> GraphState:
+    """Parse uploaded document content and map to Q&A based on user prompt."""
+    logger.info("="*60)
+    logger.info("[NODE: DOCUMENT UPLOAD] Mapping document content to Q&A")
+    inp      = state.agent_input
+    qa_json  = json.dumps([_qa_to_dict(q) for q in inp.current_qa], indent=2)
+
+    upload_prompt = inp.upload_prompt or inp.user_message or "Extract all relevant information."
+
+    user_prompt = DOCUMENT_UPLOAD_USER.format(
+        product_profile_id=inp.product_profile_id,
+        qa_json=qa_json,
+        upload_prompt=upload_prompt,
+        document_content=inp.uploaded_document_content or "",
+    )
+
+    result = _call_llm(DOCUMENT_UPLOAD_SYSTEM, user_prompt, temperature=0.2)
+
+    extracted = [
+        ExtractedAnswer(question_id=e["questionId"], answer=e["answer"])
+        for e in result.get("extractedAnswers", [])
+        if e.get("answer") is not None
+    ]
+
+    updated_qa = _apply_extracted_answers(inp.current_qa, extracted)
+    quality    = compute_quality_score(updated_qa)
+    next_q     = _next_unanswered(updated_qa)
+
+    logger.info("[DOCUMENT UPLOAD] Extracted %d answers from document", len(extracted))
+    logger.info("[DOCUMENT UPLOAD] Quality: %.1f%% (%s)", quality.overall, quality.grade)
+    logger.info("[DOCUMENT UPLOAD] Next unanswered: %s",
+                next_q.question if next_q else "NONE — all done")
+    logger.info("="*60)
+
+    return state.model_copy(update={
+        "extracted_answers":      extracted,
+        "agent_message":          result.get("agentMessage", ""),
+        "next_question":          next_q,
+        "quality_score":          quality,
+        "all_questions_answered": next_q is None,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE 7 — RESPONSE ASSEMBLER
 # Final node — packages everything into AgentOutput
 # ─────────────────────────────────────────────────────────────────────────────
 
