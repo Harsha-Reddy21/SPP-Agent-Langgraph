@@ -65,16 +65,6 @@ def make_qa_list() -> list[QAPair]:
     return [
         # ── System Information ─────────────────────────────────────────────
         QAPair(
-            id="qa-1", question="Select the appropriate option.",
-            answer=None, field_type=FieldType.RADIO,
-            options=[
-                "I am a submitter or custodian of a system that has completed AI Reviews, and my system has had a scope change that requires rereview",
-                "I would like to create a new submission",
-            ],
-            category=Category.SOLUTION, required=True, sort_order=1,
-            help_text="Choose whether this is a new submission or a rereview of an existing system.",
-        ),
-        QAPair(
             id="qa-2", question="What is the title of the System?",
             answer=None, field_type=FieldType.TEXT,
             category=Category.SOLUTION, required=True, sort_order=2,

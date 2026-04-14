@@ -279,6 +279,10 @@ if "doc_content" not in st.session_state:
     st.session_state.doc_content = None
 if "doc_name" not in st.session_state:
     st.session_state.doc_name = None
+if "pending_widget" not in st.session_state:
+    st.session_state.pending_widget = None
+if "widget_answer" not in st.session_state:
+    st.session_state.widget_answer = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,6 +389,8 @@ with st.sidebar:
         st.session_state.quality = None
         st.session_state.doc_content = None
         st.session_state.doc_name = None
+        st.session_state.pending_widget = None
+        st.session_state.widget_answer = None
         st.rerun()
 
 
@@ -439,10 +445,102 @@ for msg in st.session_state.messages:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# INTERACTIVE WIDGET — for dropdown / radio / multi_select questions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _find_next_constrained_question() -> dict | None:
+    """Find the next unanswered question that has options (dropdown/radio/multi_select)."""
+    for q in st.session_state.qa:
+        if q.get("answer") is not None or q.get("skipped", False):
+            continue
+        if q.get("field_type") in ("dropdown", "radio", "multi_select") and q.get("options"):
+            return q
+    return None
+
+
+def _render_interactive_widget():
+    """Render a selection widget for the current pending constrained question."""
+    widget = st.session_state.pending_widget
+    if not widget:
+        return
+
+    qid = widget.get("id", "")
+    question = widget.get("question", "")
+    field_type = widget.get("field_type", "dropdown")
+    options = widget.get("options", [])
+
+    st.markdown(
+        f'<div style="background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.2); '
+        f'border-radius: 12px; padding: 1rem; margin: 0.5rem 0;">'
+        f'<p style="color:#818CF8; font-weight:600; margin:0 0 0.5rem 0;">'
+        f'💬 {question}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    widget_key = f"widget_{qid}"
+
+    if field_type == "multi_select":
+        selected = st.multiselect(
+            "Select all that apply:",
+            options=options,
+            key=widget_key,
+            label_visibility="collapsed",
+        )
+    elif field_type == "radio":
+        selected = st.radio(
+            "Choose one:",
+            options=options,
+            key=widget_key,
+            index=None,
+            label_visibility="collapsed",
+            horizontal=len(options) <= 4,
+        )
+    else:  # dropdown
+        selected = st.selectbox(
+            "Select one:",
+            options=["— Select —"] + options,
+            key=widget_key,
+            label_visibility="collapsed",
+        )
+        if selected == "— Select —":
+            selected = None
+
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        submit = st.button("✅ Submit", key=f"submit_{qid}", use_container_width=True, type="primary")
+    with col2:
+        skip = st.button("⏭️ Skip", key=f"skip_{qid}", use_container_width=True)
+
+    if submit and selected:
+        if isinstance(selected, list):
+            answer_text = ", ".join(selected)
+        else:
+            answer_text = selected
+        st.session_state.pending_widget = None
+        st.session_state.widget_answer = answer_text
+        st.rerun()
+
+    if skip:
+        st.session_state.pending_widget = None
+        st.session_state.widget_answer = None
+        st.rerun()
+
+
+# Render widget if one is pending
+if st.session_state.pending_widget:
+    _render_interactive_widget()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CHAT INPUT
 # ─────────────────────────────────────────────────────────────────────────────
 
 user_input = st.chat_input("Type your answer or ask a question…")
+
+# ── Handle widget selection as input ──────────────────────────────────────────
+if "widget_answer" in st.session_state and st.session_state.widget_answer:
+    user_input = st.session_state.widget_answer
+    st.session_state.widget_answer = None
 
 if user_input:
     doc_content = st.session_state.doc_content
@@ -537,6 +635,25 @@ if user_input:
             # Completion banner
             if all_done:
                 st.success("🎉 **All questions answered!** Review the profile in the sidebar.")
+
+            # ── Detect next constrained question for widget ───────────────
+            ie = final_result.get("interactive_elements")
+            if ie and ie.get("question_id") and ie.get("options"):
+                # Use interactive element from agent response
+                matching_q = None
+                for q in st.session_state.qa:
+                    if q["id"] == ie["question_id"]:
+                        matching_q = q
+                        break
+                if matching_q and matching_q.get("answer") is None:
+                    st.session_state.pending_widget = matching_q
+            else:
+                # Auto-detect next constrained unanswered question
+                next_constrained = _find_next_constrained_question()
+                if next_constrained:
+                    st.session_state.pending_widget = next_constrained
+                else:
+                    st.session_state.pending_widget = None
 
             # ── Update session state ──────────────────────────────────────
             if extracted:

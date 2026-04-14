@@ -135,12 +135,32 @@ def _apply_extracted_answers(
     qa_pairs: list[QAPair],
     extracted: list[ExtractedAnswer],
 ) -> list[QAPair]:
-    """Merge extracted answers back into the Q&A list."""
+    """Merge extracted answers back into the Q&A list.
+
+    For dropdown / radio / multi_select fields the answer is accepted ONLY
+    when every value exists in the question's predefined options list
+    (case-insensitive match, stored with the original casing from options).
+    """
     answer_map = {e.question_id: e.answer for e in extracted}
     updated = []
     for qa in qa_pairs:
         if qa.id in answer_map:
-            qa = qa.model_copy(update={"answer": answer_map[qa.id]})
+            value = answer_map[qa.id]
+            # Validate constrained fields
+            if qa.options and qa.field_type in ("dropdown", "radio", "multi_select"):
+                opts_lower = {o.lower(): o for o in qa.options}
+                if qa.field_type == "multi_select" and isinstance(value, list):
+                    matched = [opts_lower[v.lower()] for v in value if v.lower() in opts_lower]
+                    value = matched if matched else None
+                else:
+                    value = opts_lower.get(str(value).lower())
+                if value is None:
+                    logger.warning(
+                        "[APPLY] Rejected answer for %s — value not in options %s",
+                        qa.id, qa.options,
+                    )
+            if value is not None:
+                qa = qa.model_copy(update={"answer": value})
         updated.append(qa)
     return updated
 
@@ -197,23 +217,46 @@ def extractor_node(state: GraphState) -> GraphState:
     logger.info("="*60)
     logger.info("[NODE: EXTRACTOR] Extracting answers from user message")
     inp     = state.agent_input
-    qa_json = json.dumps([_qa_to_dict(q) for q in inp.current_qa], indent=2)
     history = _format_history(inp.conversation_history)
+
+    # Pre-compute the next unanswered question BEFORE extraction
+    pre_next = _next_unanswered(inp.current_qa)
+    next_q_id = pre_next.id if pre_next else "NONE"
+    next_q_text = pre_next.question if pre_next else "All questions answered."
+    next_q_type = pre_next.field_type if pre_next else "N/A"
+    next_q_options = json.dumps(pre_next.options) if pre_next and pre_next.options else "N/A"
+
+    # Build a compact summary of already-answered questions (no full list)
+    answered_summary = "\n".join(
+        f"  {q.id}: {q.question} → {q.answer}"
+        for q in inp.current_qa if q.answer is not None
+    ) or "(none yet)"
 
     user_prompt = EXTRACTOR_USER.format(
         product_profile_id=inp.product_profile_id,
-        qa_json=qa_json,
+        answered_summary=answered_summary,
+        next_question_id=next_q_id,
+        next_question_text=next_q_text,
+        next_question_type=next_q_type,
+        next_question_options=next_q_options,
         history=history,
         user_message=inp.user_message,
     )
 
     result = _call_llm(EXTRACTOR_SYSTEM, user_prompt)
 
-    extracted = [
-        ExtractedAnswer(question_id=e["questionId"], answer=e["answer"])
-        for e in result.get("extractedAnswers", [])
-        if e.get("answer") is not None
-    ]
+    # Only accept answers for the current next question — reject anything else
+    extracted = []
+    for e in result.get("extractedAnswers", []):
+        if e.get("answer") is None:
+            continue
+        if e.get("questionId") != next_q_id:
+            logger.warning(
+                "[EXTRACTOR] Rejected answer for %s — only %s is being asked",
+                e.get("questionId"), next_q_id,
+            )
+            continue
+        extracted.append(ExtractedAnswer(question_id=e["questionId"], answer=e["answer"]))
 
     ie_data = result.get("interactiveElements")
     if ie_data and "questionId" in ie_data:
