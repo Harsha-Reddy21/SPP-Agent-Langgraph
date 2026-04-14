@@ -1,160 +1,195 @@
 """
 streamlit_app.py — Streamlit chatbot frontend for the Q&A Chat Agent
+Connects to the FastAPI backend (api.py) for all agent operations.
 Run with: streamlit run streamlit_app.py
 """
 
 import os
+import io
+import json
 import time
-import tempfile
 from copy import deepcopy
 from pathlib import Path
 
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "")
-
-from models import AgentInput, AgentOutput, QAPair, FieldType, Category, QualityScore
-from graph import run_agent, stream_agent
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG
+# CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
+
+API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 st.set_page_config(
     page_title="SPP Agent — Product Profile Chat",
     page_icon="🤖",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CUSTOM CSS
+# CUSTOM CSS — dark polished theme
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <style>
-    .stChatMessage { max-width: 85%; }
-    .qa-card {
-        padding: 0.5rem 0.8rem;
-        margin: 0.25rem 0;
-        border-radius: 8px;
-        border-left: 4px solid;
-        font-size: 0.85rem;
+    /* ── Global ─────────────────────────────────────────────── */
+    .block-container { padding-top: 1.5rem; }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #13161B 0%, #1A1D23 100%);
     }
-    .qa-answered { border-left-color: #28a745; background: #f0fff4; }
-    .qa-pending  { border-left-color: #ffc107; background: #fffdf0; }
-    .qa-skipped  { border-left-color: #6c757d; background: #f8f9fa; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #C8CDD3; }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    .app-header {
+        background: linear-gradient(135deg, #6C63FF 0%, #4F46E5 50%, #7C3AED 100%);
+        padding: 1.2rem 1.5rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+    }
+    .app-header h1 {
+        margin: 0; font-size: 1.5rem; color: #fff; font-weight: 700;
+    }
+    .app-header p {
+        margin: 0; font-size: 0.85rem; color: rgba(255,255,255,0.8);
+    }
+
+    /* ── Q&A Cards ──────────────────────────────────────────── */
+    .qa-card {
+        padding: 0.6rem 0.9rem;
+        margin: 0.3rem 0;
+        border-radius: 10px;
+        border-left: 4px solid;
+        font-size: 0.82rem;
+        transition: transform 0.15s;
+    }
+    .qa-card:hover { transform: translateX(3px); }
+    .qa-answered {
+        border-left-color: #22C55E;
+        background: rgba(34, 197, 94, 0.08);
+    }
+    .qa-answered b { color: #4ADE80; }
+    .qa-pending {
+        border-left-color: #F59E0B;
+        background: rgba(245, 158, 11, 0.06);
+    }
+    .qa-pending b { color: #FBBF24; }
+    .qa-skipped {
+        border-left-color: #64748B;
+        background: rgba(100, 116, 139, 0.06);
+    }
+    .qa-skipped b { color: #94A3B8; }
+
+    /* ── Quality badge ──────────────────────────────────────── */
     .quality-badge {
         display: inline-block;
-        padding: 0.3rem 0.8rem;
+        padding: 0.35rem 1rem;
         border-radius: 20px;
-        font-weight: 600;
-        font-size: 0.9rem;
+        font-weight: 700;
+        font-size: 0.95rem;
+        letter-spacing: 0.02em;
     }
-    .grade-excellent { background: #d4edda; color: #155724; }
-    .grade-good      { background: #d1ecf1; color: #0c5460; }
-    .grade-fair      { background: #fff3cd; color: #856404; }
-    .grade-poor      { background: #f8d7da; color: #721c24; }
-    .node-badge {
-        display: inline-block;
-        padding: 2px 8px;
+    .grade-excellent { background: rgba(34,197,94,0.15); color: #4ADE80; border: 1px solid rgba(34,197,94,0.3); }
+    .grade-good      { background: rgba(59,130,246,0.15); color: #60A5FA; border: 1px solid rgba(59,130,246,0.3); }
+    .grade-fair      { background: rgba(245,158,11,0.15); color: #FBBF24; border: 1px solid rgba(245,158,11,0.3); }
+    .grade-poor      { background: rgba(239,68,68,0.15);  color: #F87171; border: 1px solid rgba(239,68,68,0.3); }
+
+    /* ── Progress bar ───────────────────────────────────────── */
+    .progress-container {
+        background: rgba(255,255,255,0.05);
+        border-radius: 10px;
+        height: 8px;
+        margin: 0.5rem 0 1rem 0;
+        overflow: hidden;
+    }
+    .progress-bar {
+        height: 100%;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #6C63FF, #22C55E);
+        transition: width 0.5s ease;
+    }
+
+    /* ── Node streaming badges ──────────────────────────────── */
+    .node-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        border-radius: 14px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        margin: 2px 3px;
+    }
+    .node-router     { background: rgba(99,102,241,0.15); color: #818CF8; }
+    .node-extractor  { background: rgba(34,197,94,0.15);  color: #4ADE80; }
+    .node-educator   { background: rgba(251,191,36,0.15); color: #FBBF24; }
+    .node-completion { background: rgba(168,85,247,0.15); color: #C084FC; }
+    .node-document   { background: rgba(236,72,153,0.15); color: #F472B6; }
+    .node-assembler  { background: rgba(148,163,184,0.12); color: #94A3B8; }
+
+    /* ── Extracted answer pills ─────────────────────────────── */
+    .extract-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(34,197,94,0.1);
+        border: 1px solid rgba(34,197,94,0.2);
+        border-radius: 8px;
+        padding: 4px 10px;
+        margin: 3px 0;
+        font-size: 0.8rem;
+    }
+    .extract-pill .qid { color: #6C63FF; font-weight: 600; }
+    .extract-pill .ans { color: #C8CDD3; }
+
+    /* ── Sidebar section titles ─────────────────────────────── */
+    .sidebar-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748B;
+        margin: 0.8rem 0 0.4rem 0;
+    }
+
+    /* ── Upload area ────────────────────────────────────────── */
+    .upload-zone {
+        border: 2px dashed rgba(108,99,255,0.3);
         border-radius: 12px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        margin-right: 4px;
+        padding: 1rem;
+        text-align: center;
+        background: rgba(108,99,255,0.04);
+        transition: border-color 0.2s;
     }
-    .node-router     { background: #e3f2fd; color: #1565c0; }
-    .node-extractor  { background: #e8f5e9; color: #2e7d32; }
-    .node-educator   { background: #fff3e0; color: #e65100; }
-    .node-completion { background: #f3e5f5; color: #6a1b9a; }
-    .node-document   { background: #fce4ec; color: #c62828; }
-    .node-assembler  { background: #eceff1; color: #37474f; }
+    .upload-zone:hover { border-color: rgba(108,99,255,0.6); }
+
+    /* ── Chat bubbles ───────────────────────────────────────── */
+    [data-testid="stChatMessage"] {
+        border-radius: 12px !important;
+        border: 1px solid rgba(255,255,255,0.04) !important;
+    }
+
+    /* ── Metrics ────────────────────────────────────────────── */
+    [data-testid="stMetric"] {
+        background: rgba(255,255,255,0.03);
+        border-radius: 10px;
+        padding: 0.6rem;
+        border: 1px solid rgba(255,255,255,0.06);
+    }
+    [data-testid="stMetricValue"] { font-size: 1.3rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SAMPLE Q&A (same fixture as server.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def make_qa_list() -> list[QAPair]:
-    return [
-        QAPair(
-            id="qa-1", question="What is the product title?",
-            answer=None, field_type=FieldType.TEXT,
-            category=Category.SOLUTION, required=True, sort_order=1,
-            help_text="The name of your product or initiative.",
-        ),
-        QAPair(
-            id="qa-2", question="What problem does this product solve?",
-            answer=None, field_type=FieldType.TEXTAREA,
-            category=Category.SOLUTION, required=True, sort_order=2,
-            help_text="Describe the core problem in 2-3 sentences.",
-        ),
-        QAPair(
-            id="qa-3", question="Who are the primary users?",
-            answer=None, field_type=FieldType.TEXT,
-            category=Category.USER, required=True, sort_order=1,
-        ),
-        QAPair(
-            id="qa-4", question="What is the deployment region?",
-            answer=None, field_type=FieldType.DROPDOWN,
-            options=["US East", "US West", "EU", "Asia Pacific"],
-            category=Category.TECHNICAL, required=True, sort_order=1,
-        ),
-        QAPair(
-            id="qa-5", question="What is the preferred AI model?",
-            answer=None, field_type=FieldType.DROPDOWN,
-            options=["GPT-4", "Claude", "Gemini", "Llama"],
-            category=Category.TECHNICAL, required=True, sort_order=2,
-        ),
-        QAPair(
-            id="qa-6", question="Who is the development vendor/partner?",
-            answer=None, field_type=FieldType.TEXT,
-            category=Category.TECHNICAL, required=False, sort_order=3,
-        ),
-        QAPair(
-            id="qa-7", question="What is the expected budget range?",
-            answer=None, field_type=FieldType.DROPDOWN,
-            options=["< $100K", "$100K-$500K", "$500K-$1M", "> $1M"],
-            category=Category.GENERAL, required=False, sort_order=1,
-        ),
-    ]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
-
-def apply_answers(qa_list: list[QAPair], extracted: list) -> list[QAPair]:
-    qa_list = deepcopy(qa_list)
-    answer_map = {e.question_id: e.answer for e in extracted}
-    for qa in qa_list:
-        if qa.id in answer_map:
-            qa.answer = answer_map[qa.id]
-    return qa_list
-
-
-def read_uploaded_file(uploaded_file) -> str:
-    """Read content from a Streamlit UploadedFile object."""
-    suffix = Path(uploaded_file.name).suffix.lower()
-
-    if suffix == ".pdf":
-        from PyPDF2 import PdfReader
-        import io
-        reader = PdfReader(io.BytesIO(uploaded_file.read()))
-        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-
-    elif suffix == ".docx":
-        import docx
-        import io
-        doc = docx.Document(io.BytesIO(uploaded_file.read()))
-        return "\n".join(para.text for para in doc.paragraphs).strip()
-
-    else:
-        return uploaded_file.read().decode("utf-8").strip()
-
 
 NODE_LABELS = {
     "router":            ("🔀 Router", "node-router"),
@@ -167,16 +202,71 @@ NODE_LABELS = {
 }
 
 
-def grade_css_class(grade: str) -> str:
-    return f"grade-{grade.lower()}" if grade.lower() in ("excellent", "good", "fair", "poor") else "grade-fair"
+def grade_css(grade: str) -> str:
+    g = grade.lower()
+    return f"grade-{g}" if g in ("excellent", "good", "fair", "poor") else "grade-fair"
+
+
+def read_uploaded_file(uploaded_file) -> str:
+    suffix = Path(uploaded_file.name).suffix.lower()
+    if suffix == ".pdf":
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(uploaded_file.read()))
+        return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    elif suffix == ".docx":
+        import docx
+        doc = docx.Document(io.BytesIO(uploaded_file.read()))
+        return "\n".join(para.text for para in doc.paragraphs).strip()
+    else:
+        return uploaded_file.read().decode("utf-8").strip()
+
+
+def call_agent_stream(payload: dict):
+    """Call /chat/stream SSE endpoint with streaming."""
+    resp = requests.post(
+        f"{API_BASE}/chat/stream",
+        json=payload,
+        stream=True,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    for line in resp.iter_lines(decode_unicode=True):
+        if line and line.startswith("data: "):
+            data = json.loads(line[6:])
+            yield data
+
+
+def call_agent(payload: dict) -> dict:
+    """Call /chat non-streaming endpoint."""
+    resp = requests.post(f"{API_BASE}/chat", json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def apply_answers(qa_list: list[dict], extracted: list[dict]) -> list[dict]:
+    qa_list = deepcopy(qa_list)
+    answer_map = {ea["question_id"]: ea["answer"] for ea in extracted}
+    for qa in qa_list:
+        if qa["id"] in answer_map:
+            qa["answer"] = answer_map[qa["id"]]
+    return qa_list
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SESSION STATE INIT
+# SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
+
+def init_qa():
+    """Fetch Q&A template from backend or use fallback."""
+    try:
+        resp = requests.get(f"{API_BASE}/qa-template", timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return []
 
 if "qa" not in st.session_state:
-    st.session_state.qa = make_qa_list()
+    st.session_state.qa = init_qa()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "history" not in st.session_state:
@@ -192,82 +282,104 @@ if "doc_name" not in st.session_state:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — Q&A Status + File Upload
+# SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("## 📋 Product Profile")
-    st.caption(f"Profile ID: `{st.session_state.profile_id}`")
+    # ── Logo / Brand ──────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="text-align:center; padding: 0.5rem 0 0.3rem 0;">
+        <span style="font-size:2rem;">🤖</span>
+        <h2 style="margin:0; font-size:1.2rem; color:#C8CDD3;">SPP Agent</h2>
+        <span style="font-size:0.7rem; color:#64748B;">Smart Product Profile</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # ── Quality score ─────────────────────────────────────────────────────
+    st.markdown(f'<p style="text-align:center; font-size:0.7rem; color:#475569;">Profile: <code>{st.session_state.profile_id}</code></p>', unsafe_allow_html=True)
+
+    # ── Quality Score ─────────────────────────────────────────────────────
     if st.session_state.quality:
         qs = st.session_state.quality
-        css = grade_css_class(qs.grade)
-        st.markdown(
-            f'<div class="quality-badge {css}">'
-            f'{qs.grade} — {qs.overall:.0f}%</div>',
-            unsafe_allow_html=True,
-        )
+        grade = qs.get("grade", "Fair")
+        overall = qs.get("overall", 0)
+        css = grade_css(grade)
+
+        st.markdown(f'<div style="text-align:center; margin: 0.5rem 0;"><span class="quality-badge {css}">{grade} — {overall:.0f}%</span></div>', unsafe_allow_html=True)
+
+        # Progress bar
+        st.markdown(f'''
+        <div class="progress-container">
+            <div class="progress-bar" style="width: {overall}%"></div>
+        </div>
+        ''', unsafe_allow_html=True)
+
         col1, col2 = st.columns(2)
-        col1.metric("Required", f"{qs.required_completion:.0f}%")
-        col2.metric("Optional", f"{qs.optional_completion:.0f}%")
+        col1.metric("Required", f"{qs.get('required_completion', 0):.0f}%")
+        col2.metric("Optional", f"{qs.get('optional_completion', 0):.0f}%")
 
-        if qs.suggestions:
-            with st.expander("💡 Suggestions"):
-                for s in qs.suggestions:
-                    st.write(f"- {s}")
-    else:
-        st.info("Quality score will appear after your first message.")
+        suggestions = qs.get("suggestions", [])
+        if suggestions:
+            with st.expander("💡 Suggestions", expanded=False):
+                for s in suggestions:
+                    st.caption(f"→ {s}")
 
-    st.divider()
+    st.markdown('<div class="sidebar-title">📋 Questions</div>', unsafe_allow_html=True)
 
-    # ── Q&A cards ─────────────────────────────────────────────────────────
-    st.markdown("### Questions")
+    # ── Q&A Cards ─────────────────────────────────────────────────────────
+    answered_count = sum(1 for q in st.session_state.qa if q.get("answer") is not None)
+    total_count = len(st.session_state.qa)
+    st.caption(f"{answered_count} / {total_count} answered")
+
     for q in st.session_state.qa:
-        if q.answer is not None:
+        answer = q.get("answer")
+        skipped = q.get("skipped", False)
+        required = q.get("required", True)
+
+        if answer is not None:
             css_class = "qa-answered"
             icon = "✅"
-            detail = f"**{q.answer}**"
-        elif q.skipped:
+            detail = f"<span style='color:#4ADE80'>{answer}</span>"
+        elif skipped:
             css_class = "qa-skipped"
             icon = "⏭️"
-            detail = "*Skipped*"
+            detail = "<span style='color:#64748B'>Skipped</span>"
         else:
             css_class = "qa-pending"
             icon = "⏳"
-            detail = "*Pending*"
+            detail = "<span style='color:#64748B'>Awaiting answer…</span>"
 
-        req = "🔴" if q.required else "⚪"
+        req = '<span style="color:#EF4444; font-size:0.6rem;">●</span>' if required else '<span style="color:#475569; font-size:0.6rem;">○</span>'
+
         st.markdown(
             f'<div class="qa-card {css_class}">'
-            f'{icon} {req} <b>{q.question}</b><br/>{detail}</div>',
+            f'{icon} {req} <b>{q["question"]}</b><br/>{detail}</div>',
             unsafe_allow_html=True,
         )
 
-    st.divider()
-
     # ── Document Upload ───────────────────────────────────────────────────
-    st.markdown("### 📎 Upload Document")
+    st.markdown('<div class="sidebar-title">📎 Upload Document</div>', unsafe_allow_html=True)
+
     uploaded_file = st.file_uploader(
-        "Upload a document to auto-fill the profile",
+        "Drop a file to auto-fill answers",
         type=["txt", "pdf", "docx", "md", "csv"],
         key="file_uploader",
+        label_visibility="collapsed",
     )
     if uploaded_file:
         try:
             content = read_uploaded_file(uploaded_file)
             st.session_state.doc_content = content
             st.session_state.doc_name = uploaded_file.name
-            st.success(f"📄 **{uploaded_file.name}** loaded ({len(content):,} chars)")
+            st.success(f"📄 {uploaded_file.name} — {len(content):,} chars")
         except Exception as e:
-            st.error(f"Failed to read file: {e}")
+            st.error(f"Parse error: {e}")
             st.session_state.doc_content = None
             st.session_state.doc_name = None
 
-    # ── Reset button ──────────────────────────────────────────────────────
-    st.divider()
-    if st.button("🔄 Reset Profile", use_container_width=True):
-        st.session_state.qa = make_qa_list()
+    # ── Reset ─────────────────────────────────────────────────────────────
+    st.markdown("")
+    if st.button("🔄 Reset Profile", use_container_width=True, type="secondary"):
+        st.session_state.qa = init_qa()
         st.session_state.messages = []
         st.session_state.history = []
         st.session_state.quality = None
@@ -280,150 +392,171 @@ with st.sidebar:
 # MAIN CHAT AREA
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.title("🤖 SPP Agent — Product Profile Chat")
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="app-header">
+    <div>
+        <h1>🤖 Product Profile Agent</h1>
+        <p>Chat to fill your product profile or upload a document to auto-extract answers</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-if not os.getenv("OPENAI_API_KEY"):
-    st.error("⚠️ `OPENAI_API_KEY` not set. Add it to your `.env` file.")
+# ── Backend health check ─────────────────────────────────────────────────────
+try:
+    health = requests.get(f"{API_BASE}/health", timeout=3)
+    if health.status_code != 200:
+        st.error(f"⚠️ Backend not reachable at `{API_BASE}`. Start it with `python api.py`")
+        st.stop()
+except requests.ConnectionError:
+    st.error(f"⚠️ Cannot connect to backend at `{API_BASE}`. Start it with:\n```\npython api.py\n```")
     st.stop()
 
-# ── Render chat history ──────────────────────────────────────────────────────
+# ── Welcome message ──────────────────────────────────────────────────────────
+if not st.session_state.messages:
+    with st.chat_message("assistant", avatar="🤖"):
+        st.markdown(
+            "👋 **Welcome!** I'm your Product Profile assistant.\n\n"
+            "You can:\n"
+            "- **Chat** with me to answer profile questions one by one\n"
+            "- **Upload a document** (sidebar) and tell me what to extract\n\n"
+            "Let's start — **What is the product title?**"
+        )
 
+# ── Render history ────────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"], avatar="🧑‍💼" if msg["role"] == "user" else "🤖"):
+    avatar = "🧑‍💼" if msg["role"] == "user" else "🤖"
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
         if msg.get("extracted"):
-            with st.expander("📝 Extracted Answers"):
+            with st.expander("📝 Extracted Answers", expanded=False):
                 for ea in msg["extracted"]:
-                    st.write(f"- **{ea['qid']}**: {ea['answer']}")
-        if msg.get("interactive"):
-            ie = msg["interactive"]
-            st.info(f"💬 **{ie['type']}** for question `{ie['qid']}`: {', '.join(ie['options'])}")
+                    st.markdown(
+                        f'<div class="extract-pill"><span class="qid">{ea["qid"]}</span>'
+                        f'<span class="ans">{ea["answer"]}</span></div>',
+                        unsafe_allow_html=True,
+                    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHAT INPUT + AGENT EXECUTION
+# CHAT INPUT
 # ─────────────────────────────────────────────────────────────────────────────
 
-user_input = st.chat_input("Type your message or describe what the uploaded document contains...")
+user_input = st.chat_input("Type your answer or ask a question…")
 
 if user_input:
-    # ── Resolve document context ──────────────────────────────────────────
     doc_content = st.session_state.doc_content
     doc_name = st.session_state.doc_name
     upload_prompt = None
 
     if doc_content:
         upload_prompt = user_input
-        display_msg = f"📄 *[Document: {doc_name}]*\n\n{user_input}"
+        display_msg = f"📄 *[{doc_name}]*\n\n{user_input}"
     else:
         display_msg = user_input
 
-    # ── Show user message ─────────────────────────────────────────────────
+    # Show user message
     st.session_state.messages.append({"role": "user", "content": display_msg})
     with st.chat_message("user", avatar="🧑‍💼"):
         st.markdown(display_msg)
 
-    # ── Build agent input ─────────────────────────────────────────────────
-    agent_input = AgentInput(
-        product_profile_id=st.session_state.profile_id,
-        current_qa=deepcopy(st.session_state.qa),
-        user_message=user_input,
-        conversation_history=st.session_state.history,
-        uploaded_document_content=doc_content,
-        upload_prompt=upload_prompt,
-    )
+    # Build payload for API
+    payload = {
+        "product_profile_id": st.session_state.profile_id,
+        "current_qa": st.session_state.qa,
+        "user_message": user_input,
+        "conversation_history": st.session_state.history,
+        "uploaded_document_content": doc_content,
+        "upload_prompt": upload_prompt,
+    }
 
-    # ── Stream agent execution ────────────────────────────────────────────
+    # ── Streaming agent call ──────────────────────────────────────────────
     with st.chat_message("assistant", avatar="🤖"):
-        status_container = st.status("🔄 Processing...", expanded=True)
+        status_container = st.status("🔄 Processing…", expanded=True)
 
-        final_message = ""
-        extracted_answers = []
-        interactive_el = None
-        quality_score = None
-        all_answered = False
+        final_result = None
 
-        with status_container:
-            for event in stream_agent(agent_input):
-                node_name = event["node"]
-                node_state = event["state"]
+        try:
+            with status_container:
+                for event in call_agent_stream(payload):
+                    if event["type"] == "node":
+                        node = event["node"]
+                        label, css = NODE_LABELS.get(node, (node, "node-assembler"))
+                        st.markdown(
+                            f'<span class="node-pill {css}">{label}</span> ✓',
+                            unsafe_allow_html=True,
+                        )
+                    elif event["type"] == "result":
+                        final_result = event
 
-                label, css = NODE_LABELS.get(node_name, (node_name, "node-assembler"))
-                st.markdown(
-                    f'<span class="node-badge {css}">{label}</span> completed',
-                    unsafe_allow_html=True,
-                )
+                status_container.update(label="✅ Complete", state="complete", expanded=False)
 
-                # Capture state from processing nodes
-                if "agent_message" in node_state and node_state["agent_message"]:
-                    final_message = node_state["agent_message"]
-                if "extracted_answers" in node_state:
-                    extracted_answers = node_state["extracted_answers"]
-                if "interactive_elements" in node_state and node_state["interactive_elements"]:
-                    interactive_el = node_state["interactive_elements"]
-                if "quality_score" in node_state and node_state["quality_score"]:
-                    quality_score = node_state["quality_score"]
-                if "all_questions_answered" in node_state:
-                    all_answered = node_state["all_questions_answered"]
+        except requests.ConnectionError:
+            status_container.update(label="❌ Connection failed", state="error", expanded=False)
+            st.error("Lost connection to the backend.")
+            st.stop()
+        except Exception as e:
+            status_container.update(label="❌ Error", state="error", expanded=False)
+            st.error(f"Agent error: {e}")
+            # Fallback: try non-streaming
+            try:
+                final_result = call_agent(payload)
+            except Exception:
+                st.stop()
 
-            status_container.update(label="✅ Done", state="complete", expanded=False)
+        if final_result:
+            agent_msg = final_result.get("agent_message", "")
+            extracted = final_result.get("extracted_answers", [])
+            quality = final_result.get("quality_score")
+            all_done = final_result.get("all_questions_answered", False)
 
-        # ── Stream the agent message character by character ───────────────
-        if final_message:
-            placeholder = st.empty()
-            streamed = ""
-            for char in final_message:
-                streamed += char
-                placeholder.markdown(streamed + "▌")
-                time.sleep(0.01)
-            placeholder.markdown(streamed)
+            # Stream the message text
+            if agent_msg:
+                placeholder = st.empty()
+                streamed = ""
+                for char in agent_msg:
+                    streamed += char
+                    placeholder.markdown(streamed + "▌")
+                    time.sleep(0.008)
+                placeholder.markdown(streamed)
 
-        # ── Show extracted answers ────────────────────────────────────────
-        extracted_display = []
-        if extracted_answers:
-            with st.expander("📝 Extracted Answers", expanded=True):
-                for ea in extracted_answers:
-                    qid = ea.question_id if hasattr(ea, "question_id") else ea.get("question_id", "")
-                    ans = ea.answer if hasattr(ea, "answer") else ea.get("answer", "")
-                    st.write(f"- **{qid}**: {ans}")
-                    extracted_display.append({"qid": qid, "answer": ans})
+            # Show extracted answers
+            extracted_display = []
+            if extracted:
+                with st.expander("📝 Extracted Answers", expanded=True):
+                    for ea in extracted:
+                        qid = ea.get("question_id", "")
+                        ans = ea.get("answer", "")
+                        st.markdown(
+                            f'<div class="extract-pill"><span class="qid">{qid}</span>'
+                            f'<span class="ans">{ans}</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                        extracted_display.append({"qid": qid, "answer": ans})
 
-        # ── Show interactive element ──────────────────────────────────────
-        interactive_display = None
-        if interactive_el:
-            ie_type = interactive_el.type if hasattr(interactive_el, "type") else interactive_el.get("type", "")
-            ie_qid = interactive_el.question_id if hasattr(interactive_el, "question_id") else interactive_el.get("question_id", "")
-            ie_opts = interactive_el.options if hasattr(interactive_el, "options") else interactive_el.get("options", [])
-            st.info(f"💬 **{ie_type}** for `{ie_qid}`: {', '.join(ie_opts)}")
-            interactive_display = {"type": ie_type, "qid": ie_qid, "options": ie_opts}
+            # Completion banner
+            if all_done:
+                st.success("🎉 **All questions answered!** Review the profile in the sidebar.")
 
-        # ── Show completion banner ────────────────────────────────────────
-        if all_answered:
-            st.success("🎉 **All questions answered!** Review the profile in the sidebar.")
+            # ── Update session state ──────────────────────────────────────
+            if extracted:
+                st.session_state.qa = apply_answers(st.session_state.qa, extracted)
 
-    # ── Update session state ──────────────────────────────────────────────
-    if extracted_answers:
-        st.session_state.qa = apply_answers(st.session_state.qa, extracted_answers)
+            if quality:
+                st.session_state.quality = quality
 
-    if quality_score:
-        if isinstance(quality_score, dict):
-            quality_score = QualityScore(**quality_score)
-        st.session_state.quality = quality_score
+            st.session_state.history.append({"role": "user", "content": user_input})
+            st.session_state.history.append({"role": "assistant", "content": agent_msg})
 
-    st.session_state.history.append({"role": "user", "content": user_input})
-    st.session_state.history.append({"role": "assistant", "content": final_message})
+            assistant_msg = {"role": "assistant", "content": agent_msg}
+            if extracted_display:
+                assistant_msg["extracted"] = extracted_display
+            st.session_state.messages.append(assistant_msg)
 
-    # Store message for history rendering
-    assistant_msg = {"role": "assistant", "content": final_message}
-    if extracted_display:
-        assistant_msg["extracted"] = extracted_display
-    if interactive_display:
-        assistant_msg["interactive"] = interactive_display
-    st.session_state.messages.append(assistant_msg)
+            # Clear document after use
+            if doc_content:
+                st.session_state.doc_content = None
+                st.session_state.doc_name = None
 
-    # Clear document after processing
-    if doc_content:
-        st.session_state.doc_content = None
-        st.session_state.doc_name = None
+            st.rerun()
 
-    st.rerun()
