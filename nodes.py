@@ -4,10 +4,15 @@ nodes.py — All LangGraph node functions for the Q&A Chat Agent
 
 import json
 import logging
+import os
+import time
+import threading
 from typing import Any
 
+import requests as http_requests
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from dotenv import load_dotenv
 
 from models import (
     GraphState, QAPair, ExtractedAnswer,
@@ -23,16 +28,71 @@ from prompts import (
 )
 from quality import compute_quality_score
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 
-# ── LLM setup ────────────────────────────────────────────────────────────────
+# ── Lilly LLM Gateway config ─────────────────────────────────────────────────
+
+TENANT_ID       = os.getenv("Tenant_ID")
+CLIENT_ID       = os.getenv("Application_ID")
+CLIENT_SECRET   = os.getenv("Client_Secret_value")
+LLM_GATEWAY_KEY = os.getenv("LLM_GATEWAY_KEY")
+LLM_BASE_URL    = os.getenv("LLM_BASE_URL")
+LLM_MODEL       = os.getenv("LLM_MODEL")
+SCOPE           = "api://llm-gateway.lilly.com/.default"
+
+
+# ── OAuth2 Auth Service ──────────────────────────────────────────────────────
+
+class _AuthService:
+    """Thread-safe OAuth2 client-credentials token manager for the LLM Gateway."""
+
+    def __init__(self):
+        self._token: str | None = None
+        self._expiry: float = 0
+        self._lock = threading.Lock()
+
+    def get_access_token(self, force_refresh: bool = False) -> str:
+        with self._lock:
+            if force_refresh or not self._token or time.time() >= self._expiry:
+                logger.info("Fetching new OAuth2 token for LLM Gateway...")
+                r = http_requests.post(
+                    f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
+                    data={
+                        "grant_type":    "client_credentials",
+                        "client_id":     CLIENT_ID,
+                        "client_secret": CLIENT_SECRET,
+                        "scope":         SCOPE,
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+                data = r.json()
+                self._token = data["access_token"]
+                self._expiry = time.time() + data.get("expires_in", 3600) - 60
+                logger.info("OAuth2 token obtained successfully.")
+            return self._token
+
+
+_auth_service = _AuthService()
+
+
+# ── LLM setup (Lilly Gateway via ChatOpenAI) ─────────────────────────────────
 
 def _get_llm(temperature: float = 0.3) -> ChatOpenAI:
+    access_token = _auth_service.get_access_token()
     return ChatOpenAI(
-        model="gpt-4o",
+        model=LLM_MODEL,
         temperature=temperature,
         max_tokens=2048,
+        base_url=LLM_BASE_URL,
+        api_key=LLM_GATEWAY_KEY,
+        default_headers={
+            "Authorization":     f"Bearer {access_token}",
+            "X-LLM-Gateway-Key": LLM_GATEWAY_KEY,
+        },
     )
 
 
@@ -226,6 +286,17 @@ def extractor_node(state: GraphState) -> GraphState:
     next_q_type = pre_next.field_type if pre_next else "N/A"
     next_q_options = json.dumps(pre_next.options) if pre_next and pre_next.options else "N/A"
 
+    # Pre-compute the FOLLOWING question (what comes after answering the current one)
+    if pre_next:
+        temp_qa = [q.model_copy(update={"answer": "__temp__"}) if q.id == pre_next.id else q for q in inp.current_qa]
+        following = _next_unanswered(temp_qa)
+    else:
+        following = None
+    following_q_id = following.id if following else "NONE"
+    following_q_text = following.question if following else "No more questions."
+    following_q_type = following.field_type if following else "N/A"
+    following_q_options = json.dumps(following.options) if following and following.options else "N/A"
+
     # Build a compact summary of already-answered questions (no full list)
     answered_summary = "\n".join(
         f"  {q.id}: {q.question} → {q.answer}"
@@ -239,6 +310,10 @@ def extractor_node(state: GraphState) -> GraphState:
         next_question_text=next_q_text,
         next_question_type=next_q_type,
         next_question_options=next_q_options,
+        following_question_id=following_q_id,
+        following_question_text=following_q_text,
+        following_question_type=following_q_type,
+        following_question_options=following_q_options,
         history=history,
         user_message=inp.user_message,
     )

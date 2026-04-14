@@ -636,6 +636,10 @@ if user_input:
             if all_done:
                 st.success("🎉 **All questions answered!** Review the profile in the sidebar.")
 
+            # ── Update session state ──────────────────────────────────────
+            if extracted:
+                st.session_state.qa = apply_answers(st.session_state.qa, extracted)
+
             # ── Detect next constrained question for widget ───────────────
             ie = final_result.get("interactive_elements")
             if ie and ie.get("question_id") and ie.get("options"):
@@ -647,17 +651,10 @@ if user_input:
                         break
                 if matching_q and matching_q.get("answer") is None:
                     st.session_state.pending_widget = matching_q
-            else:
-                # Auto-detect next constrained unanswered question
-                next_constrained = _find_next_constrained_question()
-                if next_constrained:
-                    st.session_state.pending_widget = next_constrained
                 else:
                     st.session_state.pending_widget = None
-
-            # ── Update session state ──────────────────────────────────────
-            if extracted:
-                st.session_state.qa = apply_answers(st.session_state.qa, extracted)
+            else:
+                st.session_state.pending_widget = None
 
             if quality:
                 st.session_state.quality = quality

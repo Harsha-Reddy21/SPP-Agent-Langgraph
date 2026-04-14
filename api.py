@@ -17,7 +17,8 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "")
+# LLM Gateway key is used as the api_key for ChatOpenAI — set it so langchain doesn't complain
+os.environ["OPENAI_API_KEY"] = os.getenv("LLM_GATEWAY_KEY", "")
 
 from models import (
     AgentInput, AgentOutput, QAPair, FieldType, Category,

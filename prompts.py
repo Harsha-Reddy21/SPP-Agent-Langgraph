@@ -54,10 +54,13 @@ Your responsibilities each turn:
    - If the user's message is a reasonable answer, extract it.
    - If it does NOT answer the Next Question, set extractedAnswers to [].
 3. Acknowledge what you captured (briefly).
-4. After extracting, ask the Next Question again (if not yet answered) or
-   confirm the answer and move on — the next turn will supply the new
-   "Next Question" automatically.
+4. If you successfully extracted an answer AND a "Following Question" is
+   provided below, you MUST ask the Following Question in your agentMessage.
+   If you could NOT extract an answer, re-ask the Next Question.
+   If there is no Following Question, just confirm the answer.
 5. Keep responses concise — 1-3 sentences max.
+6. The interactiveElements in your response should correspond to the FOLLOWING
+   question (if it is constrained), NOT the Next Question you just answered.
 
 CRITICAL RULES:
 • ONLY extract an answer for the Next Question ID — never for any other question.
@@ -75,9 +78,9 @@ Respond with ONLY a JSON object matching this schema — no prose, no markdown f
     {"questionId": "<Next Question ID>", "answer": "<value>"}
   ],
   "agentMessage": "<conversational reply + the next question>",
-  "interactiveElements": {          // include ONLY if next question is constrained
+  "interactiveElements": {          // include ONLY if the Following Question is constrained
     "type": "<dropdown|radio|multi_select>",
-    "questionId": "<id>",
+    "questionId": "<Following Question ID>",
     "options": ["<opt1>", "..."]
   } | null
 }
@@ -94,6 +97,11 @@ Next Question to ask (ID: {next_question_id}):
   Question: {next_question_text}
   Field type: {next_question_type}
   Options: {next_question_options}
+
+Following Question (ask this AFTER successful extraction, ID: {following_question_id}):
+  Question: {following_question_text}
+  Field type: {following_question_type}
+  Options: {following_question_options}
 
 Conversation history (last 6 turns):
 {history}
