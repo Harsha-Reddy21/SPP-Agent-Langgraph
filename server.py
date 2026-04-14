@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from copy import deepcopy
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -104,6 +105,37 @@ def print_qa_status(qa_list: list[QAPair]):
     print("-" * 60)
 
 
+def read_document(file_path: str) -> str:
+    """Read text content from a file. Supports .txt, .pdf, .docx."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        try:
+            from PyPDF2 import PdfReader
+        except ImportError:
+            raise ImportError("Install PyPDF2 to read PDF files: pip install PyPDF2")
+        reader = PdfReader(str(path))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return text.strip()
+
+    elif suffix == ".docx":
+        try:
+            import docx
+        except ImportError:
+            raise ImportError("Install python-docx to read DOCX files: pip install python-docx")
+        doc = docx.Document(str(path))
+        text = "\n".join(para.text for para in doc.paragraphs)
+        return text.strip()
+
+    else:
+        # treat as plain text (.txt, .md, .csv, etc.)
+        return path.read_text(encoding="utf-8").strip()
+
+
 def print_output(output: AgentOutput):
     """Pretty-print the agent response."""
     print("\n" + "=" * 60)
@@ -141,6 +173,7 @@ def main():
     print("#  Q&A Chat Agent — Terminal Mode")
     print("#  Type your messages below. Type 'quit' or 'exit' to stop.")
     print("#  Type 'status' to see current Q&A state.")
+    print("#  Type 'upload <filepath>' to upload a document.")
     print("#" * 60)
 
     logger.info("Building LangGraph compiled graph...")
@@ -169,6 +202,29 @@ def main():
             print_qa_status(qa)
             continue
 
+        # ── Document upload handling ──────────────────────────────────
+        uploaded_doc_content = None
+        upload_prompt = None
+        if user_message.lower().startswith("upload "):
+            file_path = user_message[7:].strip().strip('"').strip("'")
+            try:
+                uploaded_doc_content = read_document(file_path)
+                print(f"\n  Document loaded: {file_path} ({len(uploaded_doc_content)} chars)")
+            except (FileNotFoundError, ImportError) as e:
+                print(f"\n  [ERROR] {e}")
+                continue
+
+            try:
+                upload_prompt = input("  Your instructions for this document: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+
+            if not upload_prompt:
+                upload_prompt = "Extract all relevant information from this document and map it to the product profile questions."
+
+            user_message = upload_prompt
+
         logger.info("*" * 60)
         logger.info("[TURN] User said: %s", user_message)
         logger.info("*" * 60)
@@ -179,6 +235,8 @@ def main():
                 current_qa=deepcopy(qa),
                 user_message=user_message,
                 conversation_history=history,
+                uploaded_document_content=uploaded_doc_content,
+                upload_prompt=upload_prompt,
             )
             output: AgentOutput = run_agent(agent_input)
         except Exception as e:

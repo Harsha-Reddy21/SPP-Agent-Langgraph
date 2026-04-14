@@ -45,6 +45,8 @@ class AgentInput(BaseModel):
     user_message: str
     conversation_history: list[dict] = Field(default_factory=list)
     file_extraction_results: Optional[list[dict]] = None  # from file upload (SPP-009)
+    uploaded_document_content: Optional[str] = None       # raw text from uploaded document
+    upload_prompt: Optional[str] = None                   # user's instructions for document mapping
 
 
 # ── Output Models ─────────────────────────────────────────────────────────────

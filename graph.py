@@ -11,6 +11,7 @@ from nodes import (
     education_node,
     completion_node,
     file_extraction_node,
+    document_upload_node,
     assembler_node,
 )
 
@@ -26,6 +27,7 @@ def route_decision(state: GraphState) -> str:
         "educate":         "educator",
         "complete":        "completion",
         "file_extraction": "file_extractor",
+        "document_upload": "document_uploader",
     }
     return mapping.get(state.route, "extractor")
 
@@ -42,8 +44,9 @@ def build_graph() -> StateGraph:
     graph.add_node("extractor",      extractor_node)
     graph.add_node("educator",       education_node)
     graph.add_node("completion",     completion_node)
-    graph.add_node("file_extractor", file_extraction_node)
-    graph.add_node("assembler",      assembler_node)
+    graph.add_node("file_extractor",    file_extraction_node)
+    graph.add_node("document_uploader", document_upload_node)
+    graph.add_node("assembler",          assembler_node)
 
     # ── entry point ───────────────────────────────────────────────────────────
     graph.set_entry_point("router")
@@ -53,15 +56,16 @@ def build_graph() -> StateGraph:
         "router",
         route_decision,
         {
-            "extractor":      "extractor",
-            "educator":       "educator",
-            "completion":     "completion",
-            "file_extractor": "file_extractor",
+            "extractor":         "extractor",
+            "educator":          "educator",
+            "completion":        "completion",
+            "file_extractor":    "file_extractor",
+            "document_uploader": "document_uploader",
         },
     )
 
     # ── all processing nodes → assembler → END ────────────────────────────────
-    for node in ("extractor", "educator", "completion", "file_extractor"):
+    for node in ("extractor", "educator", "completion", "file_extractor", "document_uploader"):
         graph.add_edge(node, "assembler")
 
     graph.add_edge("assembler", END)
