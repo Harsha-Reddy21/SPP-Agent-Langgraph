@@ -2,6 +2,7 @@
 graph.py — LangGraph graph definition for the Q&A Chat Agent
 """
 
+from typing import Generator
 from langgraph.graph import StateGraph, END
 
 from models import GraphState, AgentInput, AgentOutput
@@ -111,3 +112,19 @@ def run_agent(agent_input: AgentInput) -> AgentOutput:
         all_questions_answered=final_state.all_questions_answered,
         quality_score=final_state.quality_score,
     )
+
+
+def stream_agent(agent_input: AgentInput) -> Generator[dict, None, None]:
+    """
+    Streaming entry point — yields node-level progress updates as dicts.
+
+    Each yielded dict has:
+        {"node": "<node_name>", "state": <partial GraphState dict>}
+
+    The final yield contains the complete output.
+    """
+    initial_state = GraphState(agent_input=agent_input)
+
+    for event in _compiled_graph.stream(initial_state, stream_mode="updates"):
+        for node_name, node_output in event.items():
+            yield {"node": node_name, "state": node_output}
