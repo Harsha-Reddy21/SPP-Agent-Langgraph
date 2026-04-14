@@ -63,45 +63,243 @@ app.add_middleware(
 
 def make_qa_list() -> list[QAPair]:
     return [
+        # ── System Information ─────────────────────────────────────────────
         QAPair(
-            id="qa-1", question="What is the product title?",
-            answer=None, field_type=FieldType.TEXT,
+            id="qa-1", question="Select the appropriate option.",
+            answer=None, field_type=FieldType.RADIO,
+            options=[
+                "I am a submitter or custodian of a system that has completed AI Reviews, and my system has had a scope change that requires rereview",
+                "I would like to create a new submission",
+            ],
             category=Category.SOLUTION, required=True, sort_order=1,
-            help_text="The name of your product or initiative.",
+            help_text="Choose whether this is a new submission or a rereview of an existing system.",
         ),
         QAPair(
-            id="qa-2", question="What problem does this product solve?",
-            answer=None, field_type=FieldType.TEXTAREA,
+            id="qa-2", question="What is the title of the System?",
+            answer=None, field_type=FieldType.TEXT,
             category=Category.SOLUTION, required=True, sort_order=2,
-            help_text="Describe the core problem in 2-3 sentences.",
+            help_text="Provide the official name of the system or solution.",
         ),
         QAPair(
-            id="qa-3", question="Who are the primary users?",
+            id="qa-3", question="Provide an overview of the solution.",
+            answer=None, field_type=FieldType.TEXTAREA,
+            category=Category.SOLUTION, required=True, sort_order=3,
+            help_text="Describe the solution, its purpose, and how it works at a high level.",
+        ),
+        QAPair(
+            id="qa-4", question="What is the value proposition for this solution?",
+            answer=None, field_type=FieldType.TEXTAREA,
+            category=Category.SOLUTION, required=True, sort_order=4,
+            help_text="Explain the business value and benefits this solution provides.",
+        ),
+        QAPair(
+            id="qa-5", question="Which organization will sponsor the System?",
+            answer=None, field_type=FieldType.DROPDOWN,
+            options=[
+                "Lilly Research Laboratories", "Lilly Oncology", "Lilly Neuroscience",
+                "Lilly Immunology", "Lilly Diabetes", "Manufacturing Operations",
+                "Global Quality", "IT / Tech@Lilly", "Finance", "Human Resources",
+                "Legal", "Marketing", "Supply Chain", "Commercial", "Medical Affairs",
+                "Regulatory", "Corporate Affairs", "Other",
+            ],
+            category=Category.SOLUTION, required=True, sort_order=5,
+            help_text="Select the organization that will own and sponsor this system.",
+        ),
+        QAPair(
+            id="qa-6", question="Are you planning to implement a vendor product as part or all of this system?",
+            answer=None, field_type=FieldType.RADIO,
+            options=["Yes", "No"],
+            category=Category.SOLUTION, required=True, sort_order=6,
+            help_text="Indicate if an external vendor product is involved.",
+        ),
+        QAPair(
+            id="qa-7", question="Which vendor(s)?",
+            answer=None, field_type=FieldType.DROPDOWN,
+            options=[
+                "Microsoft", "Google", "Amazon Web Services", "IBM", "Salesforce",
+                "SAP", "Oracle", "Palantir", "Databricks", "Snowflake",
+                "Accenture", "Deloitte", "Cognizant", "Infosys", "Other",
+            ],
+            category=Category.SOLUTION, required=False, sort_order=7,
+            help_text="Select the vendor(s) involved. Only applicable if vendor product is being used.",
+        ),
+        QAPair(
+            id="qa-8", question="What product(s)?",
             answer=None, field_type=FieldType.TEXT,
+            category=Category.SOLUTION, required=False, sort_order=8,
+            help_text="Name of the vendor product(s) being implemented.",
+        ),
+
+        # ── User Information ───────────────────────────────────────────────
+        QAPair(
+            id="qa-9", question="Briefly describe the users of the system, what they will be using it for, and what problem it will solve for them.",
+            answer=None, field_type=FieldType.TEXTAREA,
             category=Category.USER, required=True, sort_order=1,
+            help_text="Describe who will use the system, their use case, and the problem being solved.",
         ),
         QAPair(
-            id="qa-4", question="What is the deployment region?",
+            id="qa-10", question="(Select all that apply) Where will you deploy your System?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "United States", "Europe", "Asia Pacific", "Japan", "China",
+                "Latin America", "Canada", "Middle East & Africa", "India", "Global",
+            ],
+            category=Category.USER, required=True, sort_order=2,
+            help_text="Select all regions where the system will be deployed.",
+        ),
+        QAPair(
+            id="qa-11", question="(Select all that apply) Who is the audience of this system?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "Internal Employees", "External Customers", "Healthcare Professionals",
+                "Patients", "Partners / Vendors", "Regulators", "Clinical Trial Sites",
+                "Researchers", "General Public", "Other",
+            ],
+            category=Category.USER, required=True, sort_order=3,
+            help_text="Select all audiences who will interact with the system.",
+        ),
+
+        # ── Technical Information ──────────────────────────────────────────
+        QAPair(
+            id="qa-12", question="Do you have any additional technical information to provide?",
+            answer=None, field_type=FieldType.RADIO,
+            options=["Yes", "No"],
+            category=Category.TECHNICAL, required=False, sort_order=1,
+            help_text="If yes, please fill in the technical details below. These details will be confirmed during the AI Technical Review.",
+        ),
+        QAPair(
+            id="qa-13", question="What is the maturity of the System?",
             answer=None, field_type=FieldType.DROPDOWN,
-            options=["US East", "US West", "EU", "Asia Pacific"],
-            category=Category.TECHNICAL, required=True, sort_order=1,
+            options=[
+                "Concept / Ideation", "Proof of Concept (POC)", "Pilot",
+                "Minimum Viable Product (MVP)", "Production", "Scaling / Expansion",
+                "Maintenance / Steady State", "Decommissioning",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=2,
+            help_text="Select the current maturity stage of the system.",
         ),
         QAPair(
-            id="qa-5", question="What is the preferred AI model?",
-            answer=None, field_type=FieldType.DROPDOWN,
-            options=["GPT-4", "Claude", "Gemini", "Llama"],
-            category=Category.TECHNICAL, required=True, sort_order=2,
-        ),
-        QAPair(
-            id="qa-6", question="Who is the development vendor/partner?",
-            answer=None, field_type=FieldType.TEXT,
+            id="qa-14", question="(Select all that apply) Does the System process any of the following data?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "Personal Information (PI)", "Sensitive Personal Information (SPI)",
+                "Protected Health Information (PHI)", "Patient Data",
+                "Clinical Trial Data", "Genomic / Genetic Data",
+                "Financial Data", "Employee Data", "Intellectual Property",
+                "Commercial / Sales Data", "Manufacturing Data", "None of the above",
+            ],
             category=Category.TECHNICAL, required=False, sort_order=3,
+            help_text="Processing includes collecting, recording, organizing, storing, using, transferring, viewing, combining, or deleting data.",
         ),
         QAPair(
-            id="qa-7", question="What is the expected budget range?",
+            id="qa-15", question="What is the highest data classification for processed data?",
             answer=None, field_type=FieldType.DROPDOWN,
-            options=["< $100K", "$100K-$500K", "$500K-$1M", "> $1M"],
+            options=[
+                "Public", "Internal Use", "Confidential", "Restricted",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=4,
+            help_text="If data classification increases during implementation, a new review cycle will be required.",
+        ),
+        QAPair(
+            id="qa-16", question="Is any of this data used for training the model?",
+            answer=None, field_type=FieldType.RADIO,
+            options=["Yes", "No", "Not Sure"],
+            category=Category.TECHNICAL, required=False, sort_order=5,
+            help_text="Indicate whether the processed data is used to train or fine-tune AI models.",
+        ),
+        QAPair(
+            id="qa-17", question="Describe the Data Needed.",
+            answer=None, field_type=FieldType.TEXTAREA,
+            category=Category.TECHNICAL, required=False, sort_order=6,
+            help_text="Describe what data the system needs, its sources, and how it will be used.",
+        ),
+        QAPair(
+            id="qa-18", question="(Select all that apply) Does the AI Functionality of the system do any of the following?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "Content Generation (text, images, code)",
+                "Summarization", "Classification / Categorization",
+                "Prediction / Forecasting", "Recommendation",
+                "Natural Language Processing (NLP)", "Computer Vision",
+                "Speech Recognition / Synthesis", "Anomaly Detection",
+                "Data Extraction / Parsing", "Decision Support",
+                "Process Automation (RPA + AI)", "Search / Retrieval (RAG)",
+                "Translation", "Sentiment Analysis", "Other",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=7,
+            help_text="Select all AI capabilities that the system uses.",
+        ),
+        QAPair(
+            id="qa-19", question="Is the AI System output reviewed by a human before it is used?",
+            answer=None, field_type=FieldType.RADIO,
+            options=[
+                "Yes \u2013 100% of the output",
+                "Yes \u2013 a sampling (please describe)",
+                "No",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=8,
+            help_text="Indicate the level of human review applied to AI output.",
+        ),
+        QAPair(
+            id="qa-20", question="Which AI platforms/technologies will be used?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "Azure OpenAI Service", "Amazon Bedrock", "Amazon SageMaker",
+                "Google Vertex AI", "Google Cloud AI Platform", "IBM Watson",
+                "Databricks ML", "Snowflake Cortex", "Palantir Foundry",
+                "Hugging Face", "Custom / In-house Platform", "Other",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=9,
+            help_text="Select the AI platform(s) or technology stack being used.",
+        ),
+        QAPair(
+            id="qa-21", question="Which Models will be used?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "GPT-4o", "GPT-4", "GPT-3.5 Turbo", "Claude 3.5 Sonnet",
+                "Claude 3 Opus", "Gemini 1.5 Pro", "Gemini 1.5 Flash",
+                "Cohere Command R+", "Custom Fine-tuned Model", "Other",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=10,
+            help_text="Select the AI model(s) that will be used.",
+        ),
+        QAPair(
+            id="qa-22", question="Which Open Source Models will be used?",
+            answer=None, field_type=FieldType.MULTI_SELECT,
+            options=[
+                "Llama 3", "Llama 2", "Mistral", "Mixtral",
+                "Falcon", "BLOOM", "Stable Diffusion",
+                "Whisper", "BERT", "RoBERTa", "T5", "None", "Other",
+            ],
+            category=Category.TECHNICAL, required=False, sort_order=11,
+            help_text="Select any open source models involved.",
+        ),
+        QAPair(
+            id="qa-23", question="Does the AI/ML use continuous learning?",
+            answer=None, field_type=FieldType.RADIO,
+            options=["Yes", "No"],
+            category=Category.TECHNICAL, required=False, sort_order=12,
+            help_text="Indicate if the model continuously learns and updates from new data.",
+        ),
+
+        # ── General / Administrative ───────────────────────────────────────
+        QAPair(
+            id="qa-24", question="Privacy Request Identifier",
+            answer=None, field_type=FieldType.TEXT,
             category=Category.GENERAL, required=False, sort_order=1,
+            help_text="Enter the Privacy Request Identifier if a privacy review has been initiated.",
+        ),
+        QAPair(
+            id="qa-25", question="SAE review number",
+            answer=None, field_type=FieldType.TEXT,
+            category=Category.GENERAL, required=False, sort_order=2,
+            help_text="Enter the SAE review number if applicable.",
+        ),
+        QAPair(
+            id="qa-26", question="WwTP review",
+            answer=None, field_type=FieldType.TEXT,
+            category=Category.GENERAL, required=False, sort_order=3,
+            help_text="Enter the WwTP review reference if applicable.",
         ),
     ]
 
