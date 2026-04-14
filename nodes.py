@@ -212,6 +212,8 @@ def extractor_node(state: GraphState) -> GraphState:
     ]
 
     ie_data = result.get("interactiveElements")
+    if ie_data and "questionId" in ie_data:
+        ie_data["question_id"] = ie_data.pop("questionId")
     interactive = InteractiveElement(**ie_data) if ie_data else None
 
     # apply extracted answers to get updated QA for quality scoring
